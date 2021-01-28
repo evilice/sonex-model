@@ -33,27 +33,31 @@ const runMiddlewares = (context, method) => {
   };
 };
 
-const targetCalculate = (receiver, state, current) => {
-  let counter = 0;
-  const methods = calculates.get(receiver);
-  const calculate = (state) => {
-    counter++;
-    let newState = state;
-    methods.forEach((method) => {
-      newState = method(newState, current);
-    });
+const propsCalculate = (receiver, state, current) => {
+  const handlers = calculates.get(receiver);
+  if (handlers) {
+    const calculate = (state) => {
+      const fullState = { ...current, ...state };
+      const calcState = [];
+      handlers.forEach(([property, handler]) => {
+        const newValue = handler(state, current);
+        if (newValue !== fullState[property])
+          calcState.push([property, newValue])
+      });
+  
+      return (calcState.length) ? calculate({ ...state, ...Object.fromEntries(calcState)}) : state;
+    };
+    return calculate(state);
+  }
 
-    return (newState === state || counter>50) ? state : calculate(newState);
-  };
-
-  return calculate(state)
+  return state;
 };
 
 const set = (context, target, state) => {
   const updatedProps = [];
   const run = runMiddlewares(context, 'set');
   const current = Object.freeze({ ...target });
-  const calcState = targetCalculate(context, state, current);
+  const calcState = propsCalculate(context, state, current);
   const [newState] = run(TYPE_USE.PROPS, calcState, current);
 
   Object.entries(newState).forEach(([property, value]) => {
@@ -82,7 +86,6 @@ const toObject = (state) => {
 
 const proxyHandlers = {
   set: (target, property, value, receiver) => {
-    console.log(`set property: ${ property }`);
     set(receiver, target, { [property]: value });
   },
   get: (target, property, receiver) => {
@@ -143,14 +146,13 @@ const UNUSE = (context, handler, methods, type) => {
 };
 
 class SonexModel {
-  constructor(state, _calculates = []) {
+  constructor(state, calculateProps = null) {
     const instance = new Proxy(this, proxyHandlers);
     silents.set(instance, new Set([...DEFAULT_SILENTS]));
 
-    // calculates.forEach(calc => {
-    //   instance.useProps((state, current) => ([calc(state, current), current]), 'set');
-    // });
-    calculates.set(instance, _calculates);
+    if (calculateProps)
+      calculates.set(instance, Object.entries(calculateProps));
+
     instance.set(state);
     
     return instance;
